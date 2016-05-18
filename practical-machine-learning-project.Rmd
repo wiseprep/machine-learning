@@ -1,0 +1,172 @@
+---
+title: "Practical-Machine-Learning Prediction Project"
+author: "Jay Lee"
+date: '2016-05-15'
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset).
+
+# Data
+
+The training data for this project are available here:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data are available here:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+## Prepare the datasets
+
+Load libraries.
+
+```{r library, warning=FALSE, message=FALSE}
+library(caret)        # with lattice & ggplot2
+library(reshape2)     # for melt
+library(parallel)     # for makeCluster
+library(doParallel)   # for registerDoParallel with foreach
+library(randomForest)
+```
+
+Load the training and testing data.
+
+```{r data, cache=TRUE}
+url1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+training <- read.csv(url(url1), na.strings=c("NA","#DIV/0!",""))
+
+url2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+testing <- read.csv(url(url2), na.strings=c("NA","#DIV/0!",""))
+```
+
+## Predictor candidates
+
+Belt, arm, dumbbell, and forearm variables that do not have any missing values in the test dataset will be predictor candidates.
+
+```{r predictor1}
+isAnyMissing <- sapply(testing, function (x) any(is.na(x) | x == ""))
+isPredictor <- !isAnyMissing & grepl("belt|[^(fore)]arm|dumbbell|forearm", names(isAnyMissing))
+predCandidates <- names(isAnyMissing)[isPredictor]
+predCandidates
+```
+
+Subset the primary dataset to include only the predictor candidates and the outcome variable, classe.
+
+```{r predictor2}
+training <- training[, c("classe", predCandidates)]
+dim(training)
+names(training)
+table(training[, 1])
+```
+
+## Data splitting
+
+```{r slicing}
+set.seed(as.numeric(as.Date("2016-05-15")))
+
+inTrain <- createDataPartition(y=training$classe,p=0.6,list=FALSE)
+trainingA <- training[inTrain,]
+trainingB <- training[-inTrain,]
+```
+
+## Preprocess
+
+Preprocess the prediction variables by centering and scaling.
+
+```{r preprocess}
+preObj <- preProcess(trainingA[, -1], method=c("center","scale"))
+preObj
+trainingACS <- cbind(trainingA$classe, predict(preObj, trainingA[, -1]))
+colnames(trainingACS)[1] <- "classe"
+
+# Preprocess on the remaining dataset.
+trainingBCS <- cbind(trainingB$classe, predict(preObj, trainingB[, -1]))
+colnames(trainingBCS)[1] <- "classe"
+```
+
+Identify the near zero variance predictors.
+
+```{r nzv}
+nzv <- nearZeroVar(trainingACS, saveMetrics=TRUE)
+if (any(nzv$nzv)) nzv else message("No predictors with near zero variance.")
+```
+
+Examine predictor variables.
+
+```{r histgroupFn}
+histGroup <- function (data, regex) {
+  col <- grep(regex, names(data))
+  col <- c(col, which(names(data) == "classe"))
+  n <- nrow(data)
+  DMelted <- melt(data[, col])
+  ggplot(DMelted, aes(x=classe, y=value)) +
+    geom_violin(aes(color=classe, fill=classe), alpha=1/2) +
+    facet_wrap(~ variable, scale="free_y") +
+    scale_color_brewer(palette="Spectral") +
+    scale_fill_brewer(palette="Spectral") +
+    labs(x="", y="") +
+    theme(legend.position="none")
+}
+```
+
+``` {r histgroups}
+histGroup(trainingACS, "belt")
+histGroup(trainingACS, "[^(fore)]arm")
+histGroup(trainingACS, "dumbbell")
+histGroup(trainingACS, "forearm")
+```
+
+## Train a prediction model
+
+With random forest, train the prediction model.
+
+``` {r train, cache=TRUE}
+# parallel clusters
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+# control parameters
+ctrl <- trainControl(classProbs=TRUE,savePredictions=TRUE,allowParallel=TRUE)
+
+# model fit with caret
+modFit <- train(classe ~ ., data=trainingACS, method="rf")
+
+stopCluster(cl)
+```
+
+## Evaluate the prediction model on the training dataset
+
+``` {r evaluation}
+modFit
+confusionMatrix(trainingA$classe, predict(modFit, trainingACS))
+
+# evaluate remaining dataset
+confusionMatrix(trainingBCS$classe, predict(modFit, trainingBCS))
+```
+
+## Final model
+
+``` {r finalmodel}
+varImp(modFit)
+modFit$finalModel
+```
+
+## Predict on the test dataset
+
+``` {r predict}
+testingCS <- predict(preObj, testing[, predCandidates])
+
+prediction <- predict(modFit, testingCS)
+testing <- cbind(prediction, testing)
+subset(testing, select=names(testing)[grep("belt|[^(fore)]arm|dumbbell|forearm", names(testing), invert=TRUE)])
+```
+
