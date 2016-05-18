@@ -413,6 +413,7 @@ modFit$finalModel
 ## D    0    1   26 1900    3 0.015544041
 ## E    0    1    4    6 2154 0.005080831
 ```
+**The estimated error rate is less than 1%.**
 
 ## Predict on the test dataset
 
