@@ -2,9 +2,11 @@
 title: "Practical-Machine-Learning Prediction Project"
 author: "Jay Lee"
 date: '2016-05-15'
-output: 
-  html_document: 
+output:
+  html_document:
     keep_md: yes
+    toc: yes
+  pdf_document:
     toc: yes
 ---
 
@@ -159,6 +161,7 @@ confusionMatrix(trainingBCS$classe, predict(modFit, trainingBCS))
 varImp(modFit)
 modFit$finalModel
 ```
+**The estimated error rate is less than 1%.**
 
 ## Predict on the test dataset
 
